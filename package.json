@@ -28,7 +28,13 @@
       "https://*/*"
     ],
     "permissions": [
-      "tabs"
-    ]
+      "tabs",
+      "storage",
+      "contextMenus"
+    ],
+    "action": {
+      "default_popup": "popup.html",
+      "default_title": "Quick Nav - 快速添加导航"
+    }
   }
 }
