@@ -31,22 +31,28 @@ function IndexNewtab() {
   const [bgIndex, setBgIndex] = useState(0);
   const [prevBgIndex, setPrevBgIndex] = useState(0);
   const [fade, setFade] = useState(false);
+  const [bgInterval, setBgInterval] = useState(30000);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 加载数据
   useEffect(() => {
     loadNavItems();
-    getBingWallpapers(8).then(urls => {
-      setBgUrls(urls);
-      setBgIndex(0);
-      setPrevBgIndex(0);
-    });
+    loadBackgrounds();
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     };
   }, []);
+
+  const loadBackgrounds = async () => {
+    const settings = await NavStorage.getBackgroundSettings();
+    const urls = settings.urls.length > 0 ? settings.urls : await getBingWallpapers(8);
+    setBgInterval(settings.interval);
+    setBgUrls(urls);
+    setBgIndex(0);
+    setPrevBgIndex(0);
+  }
 
   useEffect(() => {
     if (bgUrls.length > 1) {
@@ -55,13 +61,26 @@ function IndexNewtab() {
         setFade(true);
         setBgIndex(idx => (idx + 1) % bgUrls.length);
         fadeTimerRef.current = setTimeout(() => setFade(false), 1200);
-      }, 30000); // 30秒切换
+      }, bgInterval); // 按设置间隔切换
       return () => {
         if (timerRef.current) clearInterval(timerRef.current);
         if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
       };
     }
-  }, [bgUrls, bgIndex]);
+  }, [bgUrls, bgIndex, bgInterval]);
+
+  const handleItemClick = async (item: NavItem) => {
+    try {
+      const updatedItem = await NavStorage.incrementClicks(item.id)
+      if (!updatedItem) return
+
+      setNavItems(items => items.map(currentItem => (
+        currentItem.id === item.id ? updatedItem : currentItem
+      )))
+    } catch (error) {
+      console.error('记录点击次数失败:', error)
+    }
+  }
 
   const loadNavItems = async () => {
     try {
@@ -105,7 +124,8 @@ function IndexNewtab() {
       )
     }
 
-    setFilteredItems(filtered)
+    const sorted = [...filtered].sort((a, b) => (b.clicks || 0) - (a.clicks || 0))
+    setFilteredItems(sorted)
   }, [searchQuery, selectedCategory, navItems])
 
   const handleRefreshData = () => {
@@ -149,16 +169,13 @@ function IndexNewtab() {
             willChange: "opacity"
           }}
         />
+        <div className="background-scrim" />
       </div>
       {/* 内容层 */}
       <div className="nav-container" style={{ position: "relative", zIndex: 1 }}>
         {/* 头部 */}
         <header className="nav-header">
           <div className="header-top">
-            <div className="header-text">
-              <h1 className="nav-title">欢迎来到 QuickNav</h1>
-              <p className="nav-subtitle">简洁的个人导航站，帮你快速找到常用网站和工具</p>
-            </div>
             <button 
               className="manage-btn"
               onClick={() => window.open(chrome.runtime.getURL("options.html"), '_blank')}
@@ -170,6 +187,12 @@ function IndexNewtab() {
               </svg>
               管理
             </button>
+          </div>
+
+          <div className="hero-copy">
+            <div className="hero-kicker">Personal launchpad</div>
+            <h2 className="hero-title">QuickNav</h2>
+            <p className="hero-subtitle">把常用网站放在最顺手的位置</p>
           </div>
           
           {/* 搜索框 */}
@@ -196,27 +219,22 @@ function IndexNewtab() {
               刷新数据
             </button>
           </div>
+
+          <div className="category-strip" aria-label="分类筛选">
+            {categories.map(category => (
+              <button
+                key={category.name}
+                className={`category-btn ${selectedCategory === category.name ? 'active' : ''}`}
+                onClick={() => setSelectedCategory(category.name)}
+              >
+                <span className="category-name">{category.name}</span>
+                <span className="category-count">{category.count}</span>
+              </button>
+            ))}
+          </div>
         </header>
 
         <div className="nav-content">
-          {/* 侧边栏分类 */}
-          <aside className="nav-sidebar">
-            <h3 className="sidebar-title">分类</h3>
-            <ul className="category-list">
-              {categories.map(category => (
-                <li key={category.name}>
-                  <button
-                    className={`category-btn ${selectedCategory === category.name ? 'active' : ''}`}
-                    onClick={() => setSelectedCategory(category.name)}
-                  >
-                    <span className="category-name">{category.name}</span>
-                    <span className="category-count">{category.count}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </aside>
-
           {/* 主内容区域 */}
           <main className="nav-main">
             {loading ? (
@@ -229,9 +247,18 @@ function IndexNewtab() {
                 <div className="nav-grid">
                   {filteredItems.map(item => (
                     <div key={item.id} className="nav-card">
+                      <span className="card-clicks" title="点击次数">{item.clicks || 0}</span>
                       <div className="card-header">
                         <h3 className="card-title">
-                          <a href={item.url} target="_blank" rel="noopener noreferrer">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => handleItemClick(item)}
+                            onAuxClick={(event) => {
+                              if (event.button === 1) handleItemClick(item)
+                            }}
+                          >
                             {item.title}
                           </a>
                         </h3>

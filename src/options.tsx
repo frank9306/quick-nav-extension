@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { NavStorage, getStorageUsage } from "./storage"
-import type { NavItem } from "./storage"
+import type { BackgroundSettings, NavItem } from "./storage"
 
 function IndexOptions() {
   const [navItems, setNavItems] = useState<NavItem[]>([])
@@ -22,13 +22,84 @@ function IndexOptions() {
 
   // 存储信息
   const [storageInfo, setStorageInfo] = useState<{ used: number, available: number, percent: number } | null>(null)
+  const [backgroundSettings, setBackgroundSettings] = useState<BackgroundSettings>({ urls: [], interval: 30000 })
+  const [backgroundUrl, setBackgroundUrl] = useState("")
 
   useEffect(() => {
     loadNavItems()
     loadCategories()
+    loadBackgroundSettings()
     checkUrlParams()
     getStorageUsage().then(setStorageInfo)
   }, [])
+
+  const loadBackgroundSettings = async () => {
+    try {
+      const settings = await NavStorage.getBackgroundSettings()
+      setBackgroundSettings(settings)
+    } catch (error) {
+      console.error("加载背景设置失败:", error)
+    }
+  }
+
+  const saveBackgroundSettings = async (settings: BackgroundSettings) => {
+    await NavStorage.setBackgroundSettings(settings)
+    setBackgroundSettings(settings)
+    getStorageUsage().then(setStorageInfo)
+  }
+
+  const handleAddBackgroundUrl = async () => {
+    const url = backgroundUrl.trim()
+    if (!url) return
+
+    try {
+      new URL(url)
+      await saveBackgroundSettings({
+        ...backgroundSettings,
+        urls: [...backgroundSettings.urls, url]
+      })
+      setBackgroundUrl("")
+    } catch (error) {
+      alert("请输入有效的图片链接")
+    }
+  }
+
+  const handleUploadBackground = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+
+    const imageFiles = files.filter(file => file.type.startsWith("image/"))
+    if (imageFiles.length !== files.length) {
+      alert("只能上传图片文件")
+    }
+
+    const dataUrls = await Promise.all(imageFiles.map(file => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })))
+
+    await saveBackgroundSettings({
+      ...backgroundSettings,
+      urls: [...backgroundSettings.urls, ...dataUrls]
+    })
+    e.target.value = ""
+  }
+
+  const handleRemoveBackground = async (index: number) => {
+    await saveBackgroundSettings({
+      ...backgroundSettings,
+      urls: backgroundSettings.urls.filter((_, currentIndex) => currentIndex !== index)
+    })
+  }
+
+  const handleBackgroundIntervalChange = async (interval: number) => {
+    await saveBackgroundSettings({
+      ...backgroundSettings,
+      interval
+    })
+  }
 
   const loadCategories = async () => {
     try {
@@ -262,6 +333,70 @@ function IndexOptions() {
         </button>
       </div>
 
+      {/* 背景设置 */}
+      <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>背景设置</h3>
+        <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "14px" }}>
+          可添加多个网络图片链接或本地图片，新标签页会自动轮播。未设置时继续使用 Bing 壁纸。
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, marginBottom: 16 }}>
+          <input
+            type="url"
+            value={backgroundUrl}
+            onChange={(e) => setBackgroundUrl(e.target.value)}
+            placeholder="输入图片链接，例如 https://example.com/background.jpg"
+            style={{ width: "100%", padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+          />
+          <button type="button" onClick={handleAddBackgroundUrl} style={{ padding: "10px 20px", background: "#3b82f6", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}>
+            添加链接
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <label style={{ padding: "10px 20px", background: "#10b981", color: "white", borderRadius: "6px", cursor: "pointer" }}>
+            上传本地图片
+            <input type="file" accept="image/*" multiple onChange={handleUploadBackground} style={{ display: "none" }} />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#475569", fontSize: "14px" }}>
+            轮播间隔
+            <select
+              value={backgroundSettings.interval}
+              onChange={(e) => handleBackgroundIntervalChange(Number(e.target.value))}
+              style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+            >
+              <option value={10000}>10 秒</option>
+              <option value={30000}>30 秒</option>
+              <option value={60000}>60 秒</option>
+              <option value={300000}>5 分钟</option>
+            </select>
+          </label>
+          <span style={{ color: "#64748b", fontSize: "12px" }}>当前 {backgroundSettings.urls.length} 张</span>
+        </div>
+
+        {backgroundSettings.urls.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            {backgroundSettings.urls.map((url, index) => (
+              <div key={`${url}-${index}`} style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", background: "#f8fafc" }}>
+                <div style={{ height: 90, background: `url(${url}) center/cover no-repeat` }} />
+                <div style={{ padding: 10 }}>
+                  <div title={url} style={{ color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 8 }}>
+                    {url.startsWith("data:") ? "本地图片" : url}
+                  </div>
+                  <button type="button" onClick={() => handleRemoveBackground(index)} style={{ width: "100%", padding: "6px 10px", background: "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: 24, textAlign: "center", color: "#64748b", background: "#f8fafc", borderRadius: "8px" }}>
+            暂未设置自定义背景，将使用 Bing 壁纸轮播
+          </div>
+        )}
+      </div>
+
       {/* 添加/编辑表单 */}
       {showAddForm && (
         <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
@@ -400,6 +535,7 @@ function IndexOptions() {
                   <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: "12px", color: "#64748b" }}>
                     <span>分类: {item.category}</span>
                     <span>标签: {item.tags.join(", ")}</span>
+                    <span>点击: {item.clicks || 0}</span>
                     <span>{new URL(item.url).hostname}</span>
                   </div>
                 </div>

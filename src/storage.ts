@@ -7,11 +7,23 @@ export interface NavItem {
   category: string
   tags: string[]
   favicon?: string
+  clicks?: number
   createdAt: number
   updatedAt: number
 }
 
+export interface BackgroundSettings {
+  urls: string[]
+  interval: number
+}
+
 const STORAGE_KEY = 'quick-nav-items'
+const BACKGROUND_SETTINGS_KEY = 'quick-nav-background-settings'
+
+const defaultBackgroundSettings: BackgroundSettings = {
+  urls: [],
+  interval: 30000
+}
 
 // 默认数据
 const defaultNavItems: NavItem[] = [
@@ -172,6 +184,22 @@ export class NavStorage {
     return updatedItem
   }
 
+  // 增加点击次数
+  static async incrementClicks(id: string): Promise<NavItem | null> {
+    const items = await this.getNavItems()
+    const index = items.findIndex(item => item.id === id)
+    if (index === -1) return null
+
+    const updatedItem = {
+      ...items[index],
+      clicks: (items[index].clicks || 0) + 1,
+      updatedAt: Date.now()
+    }
+    items[index] = updatedItem
+    await this.setNavItems(items)
+    return updatedItem
+  }
+
   // 删除导航项
   static async deleteNavItem(id: string): Promise<boolean> {
     const items = await this.getNavItems()
@@ -219,6 +247,35 @@ export class NavStorage {
   // 重置为默认数据
   static async resetToDefault(): Promise<void> {
     await this.setNavItems(defaultNavItems)
+  }
+
+  // 获取背景设置
+  static async getBackgroundSettings(): Promise<BackgroundSettings> {
+    try {
+      const result = await chrome.storage.local.get([BACKGROUND_SETTINGS_KEY])
+      return {
+        ...defaultBackgroundSettings,
+        ...(result[BACKGROUND_SETTINGS_KEY] || {})
+      }
+    } catch (error) {
+      console.error('获取背景设置失败:', error)
+      return defaultBackgroundSettings
+    }
+  }
+
+  // 保存背景设置
+  static async setBackgroundSettings(settings: BackgroundSettings): Promise<void> {
+    try {
+      await chrome.storage.local.set({
+        [BACKGROUND_SETTINGS_KEY]: {
+          urls: settings.urls.filter(Boolean),
+          interval: Math.max(5000, settings.interval || defaultBackgroundSettings.interval)
+        }
+      })
+    } catch (error) {
+      console.error('保存背景设置失败:', error)
+      throw error
+    }
   }
 
   // 智能分类建议
