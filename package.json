@@ -1,7 +1,7 @@
 {
   "name": "quick-nav-extension",
   "displayName": "Quick nav extension",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "QuickNav - 智能导航助手：打造专属个人导航站，一键直达常用网站和工具",
   "author": "liufrank621@gmail.com",
   "scripts": {
