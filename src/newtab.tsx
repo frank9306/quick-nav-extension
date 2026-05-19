@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react"
 
 import "./style.css"
+import { MemoStorage } from "./memo-storage"
+import type { MemoTask } from "./memo-storage"
 import { NavStorage } from "./storage"
 import type { NavItem } from "./storage"
 
@@ -21,6 +23,20 @@ function getBingWallpapers(count: number = 8): Promise<string[]> {
     .catch(() => []);
 }
 
+function toDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function shiftDateKey(dateKey: string, offset: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + offset)
+  return toDateKey(date)
+}
+
 function IndexNewtab() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("全部")
@@ -32,18 +48,34 @@ function IndexNewtab() {
   const [prevBgIndex, setPrevBgIndex] = useState(0);
   const [fade, setFade] = useState(false);
   const [bgInterval, setBgInterval] = useState(30000);
+  const [selectedMemoDate, setSelectedMemoDate] = useState(() => toDateKey(new Date()))
+  const [memoTasks, setMemoTasks] = useState<MemoTask[]>([])
+  const [memoInput, setMemoInput] = useState("")
+  const [memoLoading, setMemoLoading] = useState(true)
+  const [memoCollapsed, setMemoCollapsed] = useState(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null)
 
   // 加载数据
   useEffect(() => {
     loadNavItems();
     loadBackgrounds();
+    loadMemoUiSettings();
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     };
   }, []);
+
+  const loadMemoUiSettings = async () => {
+    try {
+      const settings = await NavStorage.getMemoUiSettings()
+      setMemoCollapsed(settings.collapsed)
+    } catch (error) {
+      console.error("加载备忘录界面设置失败:", error)
+    }
+  }
 
   const loadBackgrounds = async () => {
     const settings = await NavStorage.getBackgroundSettings();
@@ -68,6 +100,69 @@ function IndexNewtab() {
       };
     }
   }, [bgUrls, bgIndex, bgInterval]);
+
+  useEffect(() => {
+    loadMemoTasks(selectedMemoDate)
+  }, [selectedMemoDate])
+
+  const loadMemoTasks = async (dateKey: string) => {
+    try {
+      setMemoLoading(true)
+      const tasks = await MemoStorage.getTasks(dateKey)
+      setMemoTasks(tasks)
+    } catch (error) {
+      console.error("加载备忘录失败:", error)
+      setMemoTasks([])
+    } finally {
+      setMemoLoading(false)
+    }
+  }
+
+  const handleAddMemoTask = async () => {
+    const text = memoInput.trim()
+    if (!text) return
+
+    try {
+      const task = await MemoStorage.addTask(selectedMemoDate, text)
+      setMemoTasks(tasks => [...tasks, task])
+      setMemoInput("")
+    } catch (error) {
+      console.error("添加备忘任务失败:", error)
+    }
+  }
+
+  const handleToggleMemoTask = async (id: string) => {
+    try {
+      const updatedTask = await MemoStorage.toggleTask(selectedMemoDate, id)
+      if (!updatedTask) return
+
+      setMemoTasks(tasks => tasks.map(task => task.id === id ? updatedTask : task))
+    } catch (error) {
+      console.error("更新备忘任务失败:", error)
+    }
+  }
+
+  const handleDeleteMemoTask = async (id: string) => {
+    try {
+      const deleted = await MemoStorage.deleteTask(selectedMemoDate, id)
+      if (deleted) {
+        setMemoTasks(tasks => tasks.filter(task => task.id !== id))
+      }
+    } catch (error) {
+      console.error("删除备忘任务失败:", error)
+    }
+  }
+
+  const handleToggleMemoCollapsed = async () => {
+    const nextCollapsed = !memoCollapsed
+    setMemoCollapsed(nextCollapsed)
+
+    try {
+      await NavStorage.setMemoUiSettings({ collapsed: nextCollapsed })
+    } catch (error) {
+      console.error("保存备忘录收起状态失败:", error)
+    }
+  }
 
   const handleItemClick = async (item: NavItem) => {
     try {
@@ -132,6 +227,9 @@ function IndexNewtab() {
     loadNavItems()
   }
 
+  const completedMemoCount = memoTasks.filter(task => task.completed).length
+  const isTodayMemo = selectedMemoDate === toDateKey(new Date())
+
   return (
     <div style={{ position: "relative", minHeight: "100vh" }}>
       {/* 背景层：前一张和当前张渐变切换 */}
@@ -173,6 +271,102 @@ function IndexNewtab() {
       </div>
       {/* 内容层 */}
       <div className="nav-container" style={{ position: "relative", zIndex: 1 }}>
+        <section className={`memo-card ${memoCollapsed ? "collapsed" : ""}`} aria-label="每日备忘录">
+          {memoCollapsed ? (
+            <button type="button" className="memo-collapsed-pill" onClick={handleToggleMemoCollapsed} title="展开备忘录">
+              <span>备忘</span>
+              <strong>{completedMemoCount}/{memoTasks.length}</strong>
+            </button>
+          ) : (
+            <>
+              <div className="memo-date-row">
+                <button
+                  type="button"
+                  className="memo-nav-btn"
+                  onClick={() => setSelectedMemoDate(date => shiftDateKey(date, -1))}
+                  title="前一天"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="memo-date-btn"
+                  onClick={() => dateInputRef.current?.showPicker?.()}
+                  title="选择日期"
+                >
+                  {selectedMemoDate}
+                </button>
+                <input
+                  ref={dateInputRef}
+                  type="date"
+                  value={selectedMemoDate}
+                  onChange={(event) => setSelectedMemoDate(event.target.value)}
+                  className="memo-date-input"
+                  aria-label="选择备忘录日期"
+                />
+                <button
+                  type="button"
+                  className="memo-nav-btn"
+                  onClick={() => setSelectedMemoDate(date => shiftDateKey(date, 1))}
+                  title="后一天"
+                >
+                  ›
+                </button>
+                <button type="button" className="memo-collapse-btn" onClick={handleToggleMemoCollapsed} title="收起备忘录">
+                  −
+                </button>
+              </div>
+
+              <div className="memo-summary">
+                <span>{isTodayMemo ? "今天任务" : "当日任务"}</span>
+                <strong>{completedMemoCount}/{memoTasks.length}</strong>
+              </div>
+
+              <div className="memo-task-list">
+                {memoLoading ? (
+                  <div className="memo-empty">加载中...</div>
+                ) : memoTasks.length === 0 ? (
+                  <div className="memo-empty">这天还没有任务</div>
+                ) : memoTasks.map(task => (
+                  <div key={task.id} className={`memo-task ${task.completed ? "completed" : ""}`}>
+                    <button
+                      type="button"
+                      className="memo-check"
+                      onClick={() => handleToggleMemoTask(task.id)}
+                      title={task.completed ? "标记未完成" : "标记完成"}
+                    >
+                      {task.completed ? "✓" : ""}
+                    </button>
+                    <span className="memo-task-text">{task.text}</span>
+                    <button
+                      type="button"
+                      className="memo-delete"
+                      onClick={() => handleDeleteMemoTask(task.id)}
+                      title="删除任务"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="memo-add-row">
+                <input
+                  type="text"
+                  value={memoInput}
+                  onChange={(event) => setMemoInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") handleAddMemoTask()
+                  }}
+                  placeholder="输入新任务..."
+                  className="memo-input"
+                />
+                <button type="button" className="memo-add-btn" onClick={handleAddMemoTask}>+</button>
+              </div>
+            </>
+          )}
+        </section>
+
         {/* 头部 */}
         <header className="nav-header">
           <div className="header-top">

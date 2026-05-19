@@ -17,12 +17,21 @@ export interface BackgroundSettings {
   interval: number
 }
 
+export interface MemoUiSettings {
+  collapsed: boolean
+}
+
 const STORAGE_KEY = 'quick-nav-items'
 const BACKGROUND_SETTINGS_KEY = 'quick-nav-background-settings'
+const MEMO_UI_SETTINGS_KEY = 'quick-nav-memo-ui-settings'
 
 const defaultBackgroundSettings: BackgroundSettings = {
   urls: [],
   interval: 30000
+}
+
+const defaultMemoUiSettings: MemoUiSettings = {
+  collapsed: false
 }
 
 // 默认数据
@@ -274,6 +283,34 @@ export class NavStorage {
       })
     } catch (error) {
       console.error('保存背景设置失败:', error)
+      throw error
+    }
+  }
+
+  // 获取备忘录界面设置
+  static async getMemoUiSettings(): Promise<MemoUiSettings> {
+    try {
+      const result = await chrome.storage.local.get([MEMO_UI_SETTINGS_KEY])
+      return {
+        ...defaultMemoUiSettings,
+        ...(result[MEMO_UI_SETTINGS_KEY] || {})
+      }
+    } catch (error) {
+      console.error('获取备忘录界面设置失败:', error)
+      return defaultMemoUiSettings
+    }
+  }
+
+  // 保存备忘录界面设置
+  static async setMemoUiSettings(settings: MemoUiSettings): Promise<void> {
+    try {
+      await chrome.storage.local.set({
+        [MEMO_UI_SETTINGS_KEY]: {
+          collapsed: Boolean(settings.collapsed)
+        }
+      })
+    } catch (error) {
+      console.error('保存备忘录界面设置失败:', error)
       throw error
     }
   }

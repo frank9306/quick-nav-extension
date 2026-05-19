@@ -1,12 +1,27 @@
 import { useState, useEffect } from "react"
+import { MemoStorage } from "./memo-storage"
+import type { MemoDayRecord } from "./memo-storage"
 import { NavStorage, getStorageUsage } from "./storage"
 import type { BackgroundSettings, NavItem } from "./storage"
+
+interface QuickNavBackup {
+  version: 1
+  exportedAt: number
+  navItems: NavItem[]
+  backgroundSettings: BackgroundSettings
+  memoDays: MemoDayRecord[]
+}
+
+function isQuickNavBackup(data: unknown): data is Partial<QuickNavBackup> {
+  return Boolean(data && typeof data === "object" && !Array.isArray(data) && "version" in data)
+}
 
 function IndexOptions() {
   const [navItems, setNavItems] = useState<NavItem[]>([])
   const [loading, setLoading] = useState(true)
   const [editingItem, setEditingItem] = useState<NavItem | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
 
   // 表单状态
   const [formData, setFormData] = useState({
@@ -164,6 +179,34 @@ function IndexOptions() {
     }
   }
 
+  const handleToggleSelection = (id: string) => {
+    setSelectedItemIds(ids => (
+      ids.includes(id) ? ids.filter(itemId => itemId !== id) : [...ids, id]
+    ))
+  }
+
+  const handleToggleSelectAll = () => {
+    setSelectedItemIds(ids => (
+      ids.length === navItems.length ? [] : navItems.map(item => item.id)
+    ))
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedItemIds.length === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedItemIds.length} 个导航项吗？`)) return
+
+    try {
+      const selectedIds = new Set(selectedItemIds)
+      const nextItems = navItems.filter(item => !selectedIds.has(item.id))
+      await NavStorage.setNavItems(nextItems)
+      setSelectedItemIds([])
+      await loadNavItems()
+      await loadCategories()
+    } catch (error) {
+      console.error("批量删除失败:", error)
+    }
+  }
+
   const handleEdit = (item: NavItem) => {
     setEditingItem(item)
     
@@ -241,11 +284,20 @@ function IndexOptions() {
   const handleExport = async () => {
     try {
       const items = await NavStorage.exportNavItems()
-      const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" })
+      const backgroundSettings = await NavStorage.getBackgroundSettings()
+      const memoDays = await MemoStorage.getAllDays()
+      const backup: QuickNavBackup = {
+        version: 1,
+        exportedAt: Date.now(),
+        navItems: items,
+        backgroundSettings,
+        memoDays
+      }
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = "nav-items.json"
+      a.download = "quick-nav-backup.json"
       a.click()
       URL.revokeObjectURL(url)
     } catch (error) {
@@ -261,8 +313,27 @@ function IndexOptions() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string)
-        await NavStorage.importNavItems(data)
+        if (Array.isArray(data)) {
+          await NavStorage.importNavItems(data)
+        } else if (isQuickNavBackup(data)) {
+          if (Array.isArray(data.navItems)) {
+            await NavStorage.importNavItems(data.navItems)
+          }
+
+          if (data.backgroundSettings) {
+            await NavStorage.setBackgroundSettings(data.backgroundSettings)
+            await loadBackgroundSettings()
+          }
+
+          if (Array.isArray(data.memoDays)) {
+            await MemoStorage.importDays(data.memoDays)
+          }
+        } else {
+          throw new Error("Unsupported backup format")
+        }
+
         await loadNavItems()
+        getStorageUsage().then(setStorageInfo)
         alert("导入成功！")
       } catch (error) {
         console.error("导入失败:", error)
@@ -518,13 +589,48 @@ function IndexOptions() {
         <div style={{ textAlign: "center", padding: 40 }}>加载中...</div>
       ) : (
         <div style={{ background: "white", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-          <div style={{ padding: "16px 24px", borderBottom: "1px solid #e2e8f0" }}>
+          <div style={{ padding: "16px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <h3 style={{ margin: 0 }}>导航列表 ({navItems.length})</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "13px", color: "#475569", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={navItems.length > 0 && selectedItemIds.length === navItems.length}
+                  onChange={handleToggleSelectAll}
+                />
+                全选
+              </label>
+              <span style={{ fontSize: "13px", color: "#64748b" }}>已选 {selectedItemIds.length} 项</span>
+              {selectedItemIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedItemIds([])}
+                  style={{ padding: "6px 12px", background: "#6b7280", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
+                >
+                  清空选择
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                disabled={selectedItemIds.length === 0}
+                style={{ padding: "6px 12px", background: selectedItemIds.length === 0 ? "#cbd5e1" : "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: selectedItemIds.length === 0 ? "not-allowed" : "pointer", fontSize: "12px" }}
+              >
+                批量删除
+              </button>
+            </div>
           </div>
           
           {navItems.map((item) => (
             <div key={item.id} style={{ padding: "16px 24px", borderBottom: "1px solid #f1f5f9" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <label style={{ marginRight: 12, paddingTop: 2, cursor: "pointer" }} title="选择导航项">
+                  <input
+                    type="checkbox"
+                    checked={selectedItemIds.includes(item.id)}
+                    onChange={() => handleToggleSelection(item.id)}
+                  />
+                </label>
                 <div style={{ flex: 1 }}>
                   <h4 style={{ margin: "0 0 8px 0", fontSize: "16px" }}>
                     <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: "#1e293b", textDecoration: "none" }}>
