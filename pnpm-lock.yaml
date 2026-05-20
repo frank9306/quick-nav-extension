@@ -40,7 +40,7 @@ importers:
         specifier: 5.3.3
         version: 5.3.3
       vitest:
-        specifier: latest
+        specifier: 4.1.7
         version: 4.1.7(@types/node@20.11.5)(vite@8.0.13(@types/node@20.11.5)(esbuild@0.18.20)(less@4.4.1)(sass@1.93.2)(yaml@2.8.1))
 
 packages:

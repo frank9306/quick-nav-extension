@@ -8,6 +8,9 @@ export interface NavItem {
   tags: string[]
   favicon?: string
   clicks?: number
+  pinned?: boolean
+  order?: number
+  lastVisitedAt?: number
   createdAt: number
   updatedAt: number
 }
