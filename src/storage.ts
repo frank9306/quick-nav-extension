@@ -1,3 +1,5 @@
+import { deriveFaviconUrl, isDuplicateUrl } from "./nav-utils"
+
 // 导航数据存储服务
 export interface NavItem {
   id: string
@@ -11,8 +13,20 @@ export interface NavItem {
   pinned?: boolean
   order?: number
   lastVisitedAt?: number
+  syncId?: string
+  deletedAt?: number
   createdAt: number
   updatedAt: number
+}
+
+export class DuplicateNavItemError extends Error {
+  existingItem: NavItem
+
+  constructor(existingItem: NavItem) {
+    super(`导航项已存在：${existingItem.title}`)
+    this.name = "DuplicateNavItemError"
+    this.existingItem = existingItem
+  }
 }
 
 export interface BackgroundSettings {
@@ -142,16 +156,32 @@ const defaultNavItems: NavItem[] = [
   }
 ]
 
+function normalizeNavItem(item: NavItem): NavItem {
+  const now = Date.now()
+
+  return {
+    ...item,
+    description: item.description || "",
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    favicon: item.favicon || deriveFaviconUrl(item.url),
+    clicks: item.clicks || 0,
+    pinned: Boolean(item.pinned),
+    createdAt: item.createdAt || now,
+    updatedAt: item.updatedAt || now
+  }
+}
+
 // 存储服务类
 export class NavStorage {
   // 获取所有导航项
   static async getNavItems(): Promise<NavItem[]> {
     try {
       const result = await chrome.storage.local.get([STORAGE_KEY])
-      return result[STORAGE_KEY] || defaultNavItems
+      const items = result[STORAGE_KEY] || defaultNavItems
+      return items.map(normalizeNavItem)
     } catch (error) {
       console.error('获取导航数据失败:', error)
-      return defaultNavItems
+      return defaultNavItems.map(normalizeNavItem)
     }
   }
 
@@ -168,12 +198,21 @@ export class NavStorage {
   // 添加导航项
   static async addNavItem(item: Omit<NavItem, 'id' | 'createdAt' | 'updatedAt'>): Promise<NavItem> {
     const items = await this.getNavItems()
-    const newItem: NavItem = {
-      ...item,
-      id: Date.now().toString(),
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+    const existingItem = items.find(currentItem => isDuplicateUrl(currentItem.url, item.url))
+    if (existingItem) {
+      throw new DuplicateNavItemError(existingItem)
     }
+
+    const now = Date.now()
+    const newItem: NavItem = normalizeNavItem({
+      ...item,
+      favicon: item.favicon || deriveFaviconUrl(item.url),
+      clicks: item.clicks || 0,
+      pinned: Boolean(item.pinned),
+      id: now.toString(),
+      createdAt: now,
+      updatedAt: now
+    })
     items.push(newItem)
     await this.setNavItems(items)
     return newItem
@@ -185,12 +224,20 @@ export class NavStorage {
     const index = items.findIndex(item => item.id === id)
     if (index === -1) return null
 
-    const updatedItem = {
+    if (updates.url) {
+      const duplicateItem = items.find(item => item.id !== id && isDuplicateUrl(item.url, updates.url!))
+      if (duplicateItem) {
+        throw new DuplicateNavItemError(duplicateItem)
+      }
+    }
+
+    const updatedItem = normalizeNavItem({
       ...items[index],
       ...updates,
       id, // 确保ID不变
+      favicon: updates.favicon || items[index].favicon || deriveFaviconUrl(updates.url || items[index].url),
       updatedAt: Date.now()
-    }
+    })
     items[index] = updatedItem
     await this.setNavItems(items)
     return updatedItem
@@ -202,11 +249,28 @@ export class NavStorage {
     const index = items.findIndex(item => item.id === id)
     if (index === -1) return null
 
-    const updatedItem = {
+    const updatedItem = normalizeNavItem({
       ...items[index],
       clicks: (items[index].clicks || 0) + 1,
+      lastVisitedAt: Date.now(),
       updatedAt: Date.now()
-    }
+    })
+    items[index] = updatedItem
+    await this.setNavItems(items)
+    return updatedItem
+  }
+
+  static async togglePinned(id: string): Promise<NavItem | null> {
+    const items = await this.getNavItems()
+    const index = items.findIndex(item => item.id === id)
+    if (index === -1) return null
+
+    const updatedItem = normalizeNavItem({
+      ...items[index],
+      pinned: !items[index].pinned,
+      updatedAt: Date.now()
+    })
+
     items[index] = updatedItem
     await this.setNavItems(items)
     return updatedItem
@@ -241,7 +305,7 @@ export class NavStorage {
     // 验证数据格式
     const validItems = items.filter(item => 
       item.title && item.url && item.category && Array.isArray(item.tags)
-    ).map(item => ({
+    ).map(item => normalizeNavItem({
       ...item,
       id: item.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
       createdAt: item.createdAt || Date.now(),
