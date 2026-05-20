@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { MemoStorage } from "./memo-storage"
 import type { MemoDayRecord } from "./memo-storage"
-import { NavStorage, getStorageUsage } from "./storage"
+import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
 import type { BackgroundSettings, NavItem } from "./storage"
 
 interface QuickNavBackup {
@@ -34,6 +34,7 @@ function IndexOptions() {
   const [customCategory, setCustomCategory] = useState("")
   const [isCustomCategory, setIsCustomCategory] = useState(false)
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
+  const [formError, setFormError] = useState("")
 
   // 存储信息
   const [storageInfo, setStorageInfo] = useState<{ used: number, available: number, percent: number } | null>(null)
@@ -179,6 +180,15 @@ function IndexOptions() {
     }
   }
 
+  const handleTogglePinned = async (id: string) => {
+    try {
+      await NavStorage.togglePinned(id)
+      await loadNavItems()
+    } catch (error) {
+      console.error("切换置顶失败:", error)
+    }
+  }
+
   const handleToggleSelection = (id: string) => {
     setSelectedItemIds(ids => (
       ids.includes(id) ? ids.filter(itemId => itemId !== id) : [...ids, id]
@@ -239,6 +249,7 @@ function IndexOptions() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setFormError("")
     
     if (!formData.title || !formData.url) return
 
@@ -277,7 +288,12 @@ function IndexOptions() {
       await loadNavItems()
       await loadCategories() // 重新加载分类列表
     } catch (error) {
-      console.error("保存失败:", error)
+      if (error instanceof DuplicateNavItemError) {
+        setFormError(`已存在相同 URL：${error.existingItem.title}`)
+      } else {
+        setFormError("保存失败，请重试")
+        console.error("保存失败:", error)
+      }
     }
   }
 
@@ -562,6 +578,12 @@ function IndexOptions() {
               </div>
             </div>
             
+            {formError && (
+              <div style={{ marginBottom: 16, color: "#dc2626", fontSize: "14px" }}>
+                {formError}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 12 }}>
               <button type="submit" style={{ padding: "10px 20px", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
                 {editingItem ? "更新" : "添加"}
@@ -639,6 +661,7 @@ function IndexOptions() {
                   </h4>
                   <p style={{ margin: "0 0 8px 0", color: "#64748b", fontSize: "14px" }}>{item.description}</p>
                   <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: "12px", color: "#64748b" }}>
+                    {item.pinned && <span>已置顶</span>}
                     <span>分类: {item.category}</span>
                     <span>标签: {item.tags.join(", ")}</span>
                     <span>点击: {item.clicks || 0}</span>
@@ -646,6 +669,12 @@ function IndexOptions() {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => handleTogglePinned(item.id)}
+                    style={{ padding: "4px 12px", background: item.pinned ? "#2563eb" : "#64748b", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
+                  >
+                    {item.pinned ? "取消置顶" : "置顶"}
+                  </button>
                   <button
                     onClick={() => handleEdit(item)}
                     style={{ padding: "4px 12px", background: "#f59e0b", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}

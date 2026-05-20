@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { NavStorage, getStorageUsage } from "./storage"
+import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
 import { MessageUtils } from "./message-utils"
 import type { NavItem } from "./storage"
 
@@ -140,8 +140,12 @@ function IndexPopup() {
       }, 1000)
       
     } catch (error) {
-      setMessage("添加失败，请重试")
-      console.error("添加导航项失败:", error)
+      if (error instanceof DuplicateNavItemError) {
+        setMessage(`已存在：${error.existingItem.title}`)
+      } else {
+        setMessage("添加失败，请重试")
+        console.error("添加导航项失败:", error)
+      }
     } finally {
       setIsSubmitting(false)
     }
