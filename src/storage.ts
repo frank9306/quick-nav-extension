@@ -231,11 +231,18 @@ export class NavStorage {
       }
     }
 
+    const nextUrl = updates.url || items[index].url
+    const nextFavicon = "favicon" in updates
+      ? updates.favicon
+      : updates.url
+        ? deriveFaviconUrl(nextUrl)
+        : items[index].favicon
+
     const updatedItem = normalizeNavItem({
       ...items[index],
       ...updates,
       id, // 确保ID不变
-      favicon: updates.favicon || items[index].favicon || deriveFaviconUrl(updates.url || items[index].url),
+      favicon: nextFavicon,
       updatedAt: Date.now()
     })
     items[index] = updatedItem
@@ -312,7 +319,16 @@ export class NavStorage {
       updatedAt: Date.now()
     }))
     
-    await this.setNavItems(validItems)
+    const acceptedItems: NavItem[] = []
+    for (const item of validItems) {
+      const duplicateItem = acceptedItems.find(existingItem => isDuplicateUrl(existingItem.url, item.url))
+      if (duplicateItem) {
+        throw new DuplicateNavItemError(duplicateItem)
+      }
+      acceptedItems.push(item)
+    }
+
+    await this.setNavItems(acceptedItems)
   }
 
   // 导出数据
