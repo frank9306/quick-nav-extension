@@ -877,9 +877,9 @@ button:hover, .manage-btn:hover, .refresh-btn:hover {
 
 .card-header {
   flex: 0 0 auto;
-  min-height: 36px;
+  min-height: 34px;
   padding-right: 72px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .card-title {
@@ -891,6 +891,7 @@ button:hover, .manage-btn:hover, .refresh-btn:hover {
 
 .card-title a {
   display: -webkit-box;
+  max-height: 54px;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -919,7 +920,7 @@ button:hover, .manage-btn:hover, .refresh-btn:hover {
   flex: 0 0 auto;
   gap: 7px;
   max-height: 30px;
-  margin-bottom: 18px;
+  margin-bottom: 0;
   overflow: hidden;
 }
 
@@ -931,16 +932,22 @@ button:hover, .manage-btn:hover, .refresh-btn:hover {
 }
 
 .card-footer {
-  flex: 0 0 auto;
-  margin-top: auto;
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 22px;
+  z-index: 1;
   min-width: 0;
-  padding-top: 16px;
+  height: 44px;
+  padding-top: 14px;
   border-top: 1px solid rgba(255,255,255,0.34);
+  overflow: visible;
 }
 
 .card-category {
   flex: 0 0 auto;
   max-width: 86px;
+  min-height: 24px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

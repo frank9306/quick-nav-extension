@@ -109,6 +109,111 @@ export function moveNavItemWithinCategory(items: NavItem[], id: string, directio
   })
 }
 
+function normalizeTagList(tags: string[]): string[] {
+  const seenTags = new Set<string>()
+  const normalizedTags: string[] = []
+
+  tags.map(tag => tag.trim()).filter(Boolean).forEach(tag => {
+    const tagKey = tag.toLowerCase()
+    if (seenTags.has(tagKey)) return
+
+    seenTags.add(tagKey)
+    normalizedTags.push(tag)
+  })
+
+  return normalizedTags
+}
+
+export function bulkUpdateCategory(items: NavItem[], ids: string[], category: string): NavItem[] {
+  const selectedIds = new Set(ids)
+  const nextCategory = category.trim()
+  if (!nextCategory || selectedIds.size === 0) return items
+
+  const now = Date.now()
+  return items.map(item => selectedIds.has(item.id) ? {
+    ...item,
+    category: nextCategory,
+    updatedAt: now
+  } : item)
+}
+
+export function bulkAddTags(items: NavItem[], ids: string[], tags: string[]): NavItem[] {
+  const selectedIds = new Set(ids)
+  const tagsToAdd = normalizeTagList(tags)
+  if (selectedIds.size === 0 || tagsToAdd.length === 0) return items
+
+  const now = Date.now()
+  return items.map(item => selectedIds.has(item.id) ? {
+    ...item,
+    tags: normalizeTagList([...item.tags, ...tagsToAdd]),
+    updatedAt: now
+  } : item)
+}
+
+export function bulkRemoveTags(items: NavItem[], ids: string[], tags: string[]): NavItem[] {
+  const selectedIds = new Set(ids)
+  const tagsToRemove = new Set(normalizeTagList(tags).map(tag => tag.toLowerCase()))
+  if (selectedIds.size === 0 || tagsToRemove.size === 0) return items
+
+  const now = Date.now()
+  return items.map(item => selectedIds.has(item.id) ? {
+    ...item,
+    tags: item.tags.filter(tag => !tagsToRemove.has(tag.toLowerCase())),
+    updatedAt: now
+  } : item)
+}
+
+export function renameCategory(items: NavItem[], oldCategory: string, newCategory: string): NavItem[] {
+  const sourceCategory = oldCategory.trim()
+  const targetCategory = newCategory.trim()
+  if (!sourceCategory || !targetCategory || sourceCategory === targetCategory) return items
+
+  const now = Date.now()
+  return items.map(item => item.category === sourceCategory ? {
+    ...item,
+    category: targetCategory,
+    updatedAt: now
+  } : item)
+}
+
+export function mergeCategory(items: NavItem[], sourceCategory: string, targetCategory: string): NavItem[] {
+  return renameCategory(items, sourceCategory, targetCategory)
+}
+
+export function renameTag(items: NavItem[], oldTag: string, newTag: string): NavItem[] {
+  const sourceTag = oldTag.trim()
+  const targetTag = newTag.trim()
+  if (!sourceTag || !targetTag || sourceTag.toLowerCase() === targetTag.toLowerCase()) return items
+
+  const now = Date.now()
+  return items.map(item => {
+    const hasTag = item.tags.some(tag => tag.toLowerCase() === sourceTag.toLowerCase())
+    if (!hasTag) return item
+
+    return {
+      ...item,
+      tags: normalizeTagList(item.tags.map(tag => tag.toLowerCase() === sourceTag.toLowerCase() ? targetTag : tag)),
+      updatedAt: now
+    }
+  })
+}
+
+export function deleteTag(items: NavItem[], tag: string): NavItem[] {
+  const targetTag = tag.trim().toLowerCase()
+  if (!targetTag) return items
+
+  const now = Date.now()
+  return items.map(item => {
+    if (!item.tags.some(currentTag => currentTag.toLowerCase() === targetTag)) return item
+
+    return {
+      ...item,
+      tags: item.tags.filter(currentTag => currentTag.toLowerCase() !== targetTag),
+      updatedAt: now
+    }
+  })
+}
+
 export function filterNavItems(items: NavItem[], selectedCategory: string, searchQuery: string): NavItem[] {
   let filtered = items
 

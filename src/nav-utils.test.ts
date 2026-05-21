@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  bulkAddTags,
+  bulkRemoveTags,
+  bulkUpdateCategory,
+  deleteTag,
   deriveFaviconUrl,
   filterNavItems,
   isDuplicateUrl,
+  mergeCategory,
   moveNavItemWithinCategory,
   normalizeNavUrl,
   RECENT_NAV_LIMIT,
+  renameCategory,
+  renameTag,
   sortNavItems
 } from "./nav-utils"
 import type { NavItem } from "./storage"
@@ -87,6 +94,64 @@ describe("moveNavItemWithinCategory", () => {
     ]
 
     expect(moveNavItemWithinCategory(items, "tools-1", "up")).toEqual(items)
+  })
+})
+
+describe("bulk item updates", () => {
+  const items: NavItem[] = [
+    { ...baseItem, id: "one", category: "工具", tags: ["AI", "工具"] },
+    { ...baseItem, id: "two", category: "学习", tags: ["文档"] }
+  ]
+
+  it("updates category for selected items", () => {
+    const updated = bulkUpdateCategory(items, ["one"], "开发")
+
+    expect(updated.find(item => item.id === "one")?.category).toBe("开发")
+    expect(updated.find(item => item.id === "two")?.category).toBe("学习")
+  })
+
+  it("adds tags to selected items without duplicates", () => {
+    const updated = bulkAddTags(items, ["one"], ["AI", "效率", "效率"])
+
+    expect(updated.find(item => item.id === "one")?.tags).toEqual(["AI", "工具", "效率"])
+  })
+
+  it("removes tags from selected items case-insensitively", () => {
+    const updated = bulkRemoveTags(items, ["one"], ["ai"])
+
+    expect(updated.find(item => item.id === "one")?.tags).toEqual(["工具"])
+  })
+})
+
+describe("category and tag management", () => {
+  const items: NavItem[] = [
+    { ...baseItem, id: "one", category: "工具", tags: ["AI", "工具"] },
+    { ...baseItem, id: "two", category: "学习", tags: ["AI", "文档"] }
+  ]
+
+  it("renames categories", () => {
+    const updated = renameCategory(items, "工具", "开发")
+
+    expect(updated.map(item => item.category)).toEqual(["开发", "学习"])
+  })
+
+  it("merges categories by moving source items to target category", () => {
+    const updated = mergeCategory(items, "学习", "工具")
+
+    expect(updated.map(item => item.category)).toEqual(["工具", "工具"])
+  })
+
+  it("renames tags and deduplicates renamed tags", () => {
+    const updated = renameTag(items, "AI", "工具")
+
+    expect(updated.find(item => item.id === "one")?.tags).toEqual(["工具"])
+    expect(updated.find(item => item.id === "two")?.tags).toEqual(["工具", "文档"])
+  })
+
+  it("deletes tags", () => {
+    const updated = deleteTag(items, "AI")
+
+    expect(updated.map(item => item.tags)).toEqual([["工具"], ["文档"]])
   })
 })
 

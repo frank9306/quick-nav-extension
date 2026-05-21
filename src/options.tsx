@@ -1,7 +1,19 @@
 import { useState, useEffect } from "react"
 import { MemoStorage } from "./memo-storage"
 import type { MemoDayRecord } from "./memo-storage"
-import { getNavHostname, moveNavItemWithinCategory, refreshFaviconUrl, sortNavItems } from "./nav-utils"
+import {
+  bulkAddTags,
+  bulkRemoveTags,
+  bulkUpdateCategory,
+  deleteTag,
+  getNavHostname,
+  mergeCategory,
+  moveNavItemWithinCategory,
+  refreshFaviconUrl,
+  renameCategory,
+  renameTag,
+  sortNavItems
+} from "./nav-utils"
 import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
 import type { BackgroundSettings, NavItem, RestorePoint } from "./storage"
 
@@ -36,6 +48,12 @@ function IndexOptions() {
   const [isCustomCategory, setIsCustomCategory] = useState(false)
   const [availableCategories, setAvailableCategories] = useState<string[]>([])
   const [formError, setFormError] = useState("")
+  const [bulkCategory, setBulkCategory] = useState("工具")
+  const [bulkTags, setBulkTags] = useState("")
+  const [categorySource, setCategorySource] = useState("")
+  const [categoryTarget, setCategoryTarget] = useState("")
+  const [tagSource, setTagSource] = useState("")
+  const [tagTarget, setTagTarget] = useState("")
 
   // 存储信息
   const [storageInfo, setStorageInfo] = useState<{ used: number, available: number, percent: number } | null>(null)
@@ -180,6 +198,17 @@ function IndexOptions() {
     }
   }
 
+  const reloadNavMetadata = async () => {
+    await loadNavItems()
+    await loadCategories()
+    getStorageUsage().then(setStorageInfo)
+  }
+
+  const saveManagedNavItems = async (items: NavItem[]) => {
+    await NavStorage.setNavItems(items)
+    await reloadNavMetadata()
+  }
+
   const handleDelete = async (id: string) => {
     if (!confirm("确定要删除这个导航项吗？")) return
     
@@ -246,6 +275,92 @@ function IndexOptions() {
       await loadCategories()
     } catch (error) {
       console.error("批量删除失败:", error)
+    }
+  }
+
+  const handleBulkUpdateCategory = async () => {
+    if (selectedItemIds.length === 0) return
+    const category = bulkCategory.trim()
+    if (!category) return alert("请输入或选择分类")
+
+    try {
+      await saveManagedNavItems(bulkUpdateCategory(navItems, selectedItemIds, category))
+    } catch (error) {
+      console.error("批量修改分类失败:", error)
+    }
+  }
+
+  const handleBulkAddTags = async () => {
+    if (selectedItemIds.length === 0) return
+    const tags = bulkTags.split(",").map(tag => tag.trim()).filter(Boolean)
+    if (tags.length === 0) return alert("请输入要添加的标签")
+
+    try {
+      await saveManagedNavItems(bulkAddTags(navItems, selectedItemIds, tags))
+      setBulkTags("")
+    } catch (error) {
+      console.error("批量添加标签失败:", error)
+    }
+  }
+
+  const handleBulkRemoveTags = async () => {
+    if (selectedItemIds.length === 0) return
+    const tags = bulkTags.split(",").map(tag => tag.trim()).filter(Boolean)
+    if (tags.length === 0) return alert("请输入要移除的标签")
+
+    try {
+      await saveManagedNavItems(bulkRemoveTags(navItems, selectedItemIds, tags))
+      setBulkTags("")
+    } catch (error) {
+      console.error("批量移除标签失败:", error)
+    }
+  }
+
+  const handleRenameCategory = async () => {
+    if (!categorySource.trim() || !categoryTarget.trim()) return alert("请选择原分类并输入新分类")
+
+    try {
+      await saveManagedNavItems(renameCategory(navItems, categorySource, categoryTarget))
+      setCategoryTarget("")
+    } catch (error) {
+      console.error("重命名分类失败:", error)
+    }
+  }
+
+  const handleMergeCategory = async () => {
+    if (!categorySource.trim() || !categoryTarget.trim()) return alert("请选择源分类和目标分类")
+    if (!confirm(`确定要把「${categorySource}」合并到「${categoryTarget}」吗？`)) return
+
+    try {
+      await saveManagedNavItems(mergeCategory(navItems, categorySource, categoryTarget))
+      setCategorySource("")
+      setCategoryTarget("")
+    } catch (error) {
+      console.error("合并分类失败:", error)
+    }
+  }
+
+  const handleRenameTag = async () => {
+    if (!tagSource.trim() || !tagTarget.trim()) return alert("请选择原标签并输入新标签")
+
+    try {
+      await saveManagedNavItems(renameTag(navItems, tagSource, tagTarget))
+      setTagTarget("")
+    } catch (error) {
+      console.error("重命名标签失败:", error)
+    }
+  }
+
+  const handleDeleteTag = async () => {
+    if (!tagSource.trim()) return alert("请选择要删除的标签")
+    if (!confirm(`确定要从所有导航项中删除「${tagSource}」标签吗？`)) return
+
+    try {
+      await saveManagedNavItems(deleteTag(navItems, tagSource))
+      setTagSource("")
+      setTagTarget("")
+    } catch (error) {
+      console.error("删除标签失败:", error)
     }
   }
 
@@ -436,6 +551,9 @@ function IndexOptions() {
     const categoryItems = getCategorySortedItems(item.category)
     return categoryItems[categoryItems.length - 1]?.id === item.id
   }
+
+  const categoriesForManagement = Array.from(new Set(navItems.map(item => item.category))).sort()
+  const tagsForManagement = Array.from(new Set(navItems.flatMap(item => item.tags))).sort()
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
@@ -698,6 +816,117 @@ function IndexOptions() {
           </form>
         </div>
       )}
+
+      {/* 批量与分类标签管理 */}
+      <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>批量与分类标签管理</h3>
+        <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "14px" }}>
+          先在下方列表勾选导航项，再批量调整分类或标签；分类和标签管理会作用于全部导航项。
+        </p>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+          <section style={{ padding: 16, border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+            <h4 style={{ margin: "0 0 12px 0" }}>批量编辑已选项</h4>
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                批量分类
+                <input
+                  list="bulk-category-list"
+                  value={bulkCategory}
+                  onChange={(e) => setBulkCategory(e.target.value)}
+                  placeholder="输入或选择分类"
+                  style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+                />
+              </label>
+              <button type="button" onClick={handleBulkUpdateCategory} disabled={selectedItemIds.length === 0} style={{ padding: "8px 12px", background: selectedItemIds.length === 0 ? "#cbd5e1" : "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: selectedItemIds.length === 0 ? "not-allowed" : "pointer" }}>
+                修改 {selectedItemIds.length} 项分类
+              </button>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                批量标签（逗号分隔）
+                <input
+                  value={bulkTags}
+                  onChange={(e) => setBulkTags(e.target.value)}
+                  placeholder="例如 AI, 工具"
+                  style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={handleBulkAddTags} disabled={selectedItemIds.length === 0} style={{ padding: "8px 12px", background: selectedItemIds.length === 0 ? "#cbd5e1" : "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: selectedItemIds.length === 0 ? "not-allowed" : "pointer" }}>
+                  添加标签
+                </button>
+                <button type="button" onClick={handleBulkRemoveTags} disabled={selectedItemIds.length === 0} style={{ padding: "8px 12px", background: selectedItemIds.length === 0 ? "#cbd5e1" : "#f97316", color: "white", border: "none", borderRadius: "4px", cursor: selectedItemIds.length === 0 ? "not-allowed" : "pointer" }}>
+                  移除标签
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section style={{ padding: 16, border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+            <h4 style={{ margin: "0 0 12px 0" }}>分类管理</h4>
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                原分类 / 源分类
+                <select value={categorySource} onChange={(e) => setCategorySource(e.target.value)} style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}>
+                  <option value="">请选择分类</option>
+                  {categoriesForManagement.map(category => <option key={category} value={category}>{category}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                新分类 / 目标分类
+                <input
+                  list="bulk-category-list"
+                  value={categoryTarget}
+                  onChange={(e) => setCategoryTarget(e.target.value)}
+                  placeholder="输入或选择分类"
+                  style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={handleRenameCategory} style={{ padding: "8px 12px", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  重命名分类
+                </button>
+                <button type="button" onClick={handleMergeCategory} style={{ padding: "8px 12px", background: "#8b5cf6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  合并分类
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section style={{ padding: 16, border: "1px solid #e2e8f0", borderRadius: "8px", background: "#f8fafc" }}>
+            <h4 style={{ margin: "0 0 12px 0" }}>标签管理</h4>
+            <div style={{ display: "grid", gap: 10 }}>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                原标签
+                <select value={tagSource} onChange={(e) => setTagSource(e.target.value)} style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}>
+                  <option value="">请选择标签</option>
+                  {tagsForManagement.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+                新标签
+                <input
+                  value={tagTarget}
+                  onChange={(e) => setTagTarget(e.target.value)}
+                  placeholder="输入新标签"
+                  style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" onClick={handleRenameTag} style={{ padding: "8px 12px", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  重命名标签
+                </button>
+                <button type="button" onClick={handleDeleteTag} style={{ padding: "8px 12px", background: "#ef4444", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  删除标签
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <datalist id="bulk-category-list">
+          {categoriesForManagement.map(category => <option key={category} value={category} />)}
+        </datalist>
+      </div>
 
       {/* 导航列表 */}
       {loading ? (
