@@ -272,8 +272,45 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
+.nav-card.pinned {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 10px 36px rgba(37, 99, 235, 0.18);
+}
+
 .card-header {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  gap: 10px;
+  align-items: center;
   margin-bottom: 12px;
+}
+
+.card-favicon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.8);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.card-action-btn {
+  padding: 5px 8px !important;
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.card-action-btn.active {
+  background: rgba(37, 99, 235, 0.9) !important;
 }
 
 .card-title {

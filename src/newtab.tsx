@@ -3,7 +3,13 @@ import { useState, useEffect, useRef } from "react"
 import "./style.css"
 import { MemoStorage } from "./memo-storage"
 import type { MemoTask } from "./memo-storage"
-import { sortNavItems } from "./nav-utils"
+import {
+  ALL_CATEGORY_NAME,
+  RECENT_CATEGORY_NAME,
+  filterNavItems,
+  getNavHostname,
+  isEditableElement
+} from "./nav-utils"
 import { NavStorage } from "./storage"
 import type { NavItem } from "./storage"
 
@@ -40,9 +46,10 @@ function shiftDateKey(dateKey: string, offset: number): string {
 
 function IndexNewtab() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState("全部")
+  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORY_NAME)
   const [navItems, setNavItems] = useState<NavItem[]>([])
   const [filteredItems, setFilteredItems] = useState<NavItem[]>([])
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [bgUrls, setBgUrls] = useState<string[]>([]);
   const [bgIndex, setBgIndex] = useState(0);
@@ -56,6 +63,7 @@ function IndexNewtab() {
   const [memoCollapsed, setMemoCollapsed] = useState(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const fadeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const dateInputRef = useRef<HTMLInputElement | null>(null)
 
   // 加载数据
@@ -68,6 +76,32 @@ function IndexNewtab() {
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableElement(event.target)) {
+        if (event.key === "Escape" && event.target === searchInputRef.current) {
+          setSearchQuery("")
+          searchInputRef.current?.blur()
+        }
+        return
+      }
+
+      if (event.key === "/" || (event.key.toLowerCase() === "k" && event.ctrlKey)) {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+        return
+      }
+
+      if (event.key === "Escape") {
+        setSearchQuery("")
+        searchInputRef.current?.blur()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   const loadMemoUiSettings = async () => {
     try {
@@ -178,6 +212,29 @@ function IndexNewtab() {
     }
   }
 
+  const handleTogglePinned = async (id: string) => {
+    try {
+      const updatedItem = await NavStorage.togglePinned(id)
+      if (!updatedItem) return
+
+      setNavItems(items => items.map(item => item.id === id ? updatedItem : item))
+    } catch (error) {
+      console.error("切换置顶失败:", error)
+    }
+  }
+
+  const handleCopyUrl = async (item: NavItem) => {
+    try {
+      await navigator.clipboard.writeText(item.url)
+      setCopiedItemId(item.id)
+      window.setTimeout(() => {
+        setCopiedItemId(currentId => currentId === item.id ? null : currentId)
+      }, 1200)
+    } catch (error) {
+      console.error("复制链接失败:", error)
+    }
+  }
+
   const loadNavItems = async () => {
     try {
       setLoading(true)
@@ -191,8 +248,10 @@ function IndexNewtab() {
   }
 
   // 计算分类统计
+  const recentCount = navItems.filter(item => item.lastVisitedAt).length
   const categories: Category[] = [
-    { name: "全部", count: navItems.length },
+    { name: ALL_CATEGORY_NAME, count: navItems.length },
+    { name: RECENT_CATEGORY_NAME, count: recentCount },
     ...Object.entries(
       navItems.reduce((acc, item) => {
         acc[item.category] = (acc[item.category] || 0) + 1
@@ -203,25 +262,7 @@ function IndexNewtab() {
 
   // 搜索和过滤逻辑
   useEffect(() => {
-    let filtered = navItems
-
-    // 分类过滤
-    if (selectedCategory !== "全部") {
-      filtered = filtered.filter(item => item.category === selectedCategory)
-    }
-
-    // 搜索过滤
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      filtered = filtered.filter(item =>
-        item.title.toLowerCase().includes(query) ||
-        item.description.toLowerCase().includes(query) ||
-        item.tags.some(tag => tag.toLowerCase().includes(query))
-      )
-    }
-
-    const sorted = sortNavItems(filtered)
-    setFilteredItems(sorted)
+    setFilteredItems(filterNavItems(navItems, selectedCategory, searchQuery))
   }, [searchQuery, selectedCategory, navItems])
 
   const handleRefreshData = () => {
@@ -398,6 +439,7 @@ function IndexNewtab() {
                 <path d="m21 21-4.35-4.35"></path>
               </svg>
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder="搜索网站、工具或标签..."
                 value={searchQuery}
@@ -441,9 +483,10 @@ function IndexNewtab() {
               <>
                 <div className="nav-grid">
                   {filteredItems.map(item => (
-                    <div key={item.id} className="nav-card">
+                    <div key={item.id} className={`nav-card ${item.pinned ? "pinned" : ""}`}>
                       <span className="card-clicks" title="点击次数">{item.clicks || 0}</span>
                       <div className="card-header">
+                        {item.favicon && <img src={item.favicon} alt="" className="card-favicon" />}
                         <h3 className="card-title">
                           <a
                             href={item.url}
@@ -457,6 +500,24 @@ function IndexNewtab() {
                             {item.title}
                           </a>
                         </h3>
+                        <div className="card-actions">
+                          <button
+                            type="button"
+                            className={`card-action-btn ${item.pinned ? "active" : ""}`}
+                            onClick={() => handleTogglePinned(item.id)}
+                            title={item.pinned ? "取消置顶" : "置顶"}
+                          >
+                            {item.pinned ? "已置顶" : "置顶"}
+                          </button>
+                          <button
+                            type="button"
+                            className="card-action-btn"
+                            onClick={() => handleCopyUrl(item)}
+                            title="复制链接"
+                          >
+                            {copiedItemId === item.id ? "已复制" : "复制"}
+                          </button>
+                        </div>
                       </div>
                       
                       <p className="card-description">{item.description}</p>
@@ -471,7 +532,7 @@ function IndexNewtab() {
                       
                       <div className="card-footer">
                         <span className="card-category">{item.category}</span>
-                        <span className="card-url">{new URL(item.url).hostname}</span>
+                        <span className="card-url">{getNavHostname(item.url)}</span>
                       </div>
                     </div>
                   ))}
