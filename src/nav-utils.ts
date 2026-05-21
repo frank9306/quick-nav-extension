@@ -2,6 +2,7 @@ import type { NavItem } from "./storage"
 
 export const RECENT_CATEGORY_NAME = "最近访问"
 export const ALL_CATEGORY_NAME = "全部"
+export const RECENT_NAV_LIMIT = 10
 
 export function normalizeNavUrl(url: string): string {
   const parsed = new URL(url)
@@ -32,6 +33,13 @@ export function deriveFaviconUrl(url: string): string | undefined {
   }
 }
 
+export function refreshFaviconUrl(url: string): string | undefined {
+  const faviconUrl = deriveFaviconUrl(url)
+  if (!faviconUrl) return undefined
+
+  return `${faviconUrl}&refresh=${Date.now()}`
+}
+
 export function getNavHostname(url: string): string {
   try {
     return new URL(url).hostname.toLowerCase()
@@ -57,6 +65,50 @@ export function sortNavItems(items: NavItem[]): NavItem[] {
   })
 }
 
+export function assignCategoryOrder(items: NavItem[], category: string): NavItem[] {
+  let order = 0
+
+  return items.map(item => {
+    if (item.category !== category) return item
+
+    return {
+      ...item,
+      order: order++
+    }
+  })
+}
+
+export function moveNavItemWithinCategory(items: NavItem[], id: string, direction: "up" | "down"): NavItem[] {
+  const currentItem = items.find(item => item.id === id)
+  if (!currentItem) return items
+
+  const categoryItems = sortNavItems(items.filter(item => item.category === currentItem.category))
+  const currentIndex = categoryItems.findIndex(item => item.id === id)
+  const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+
+  if (currentIndex === -1 || nextIndex < 0 || nextIndex >= categoryItems.length) {
+    return items
+  }
+
+  const reorderedCategoryItems = [...categoryItems]
+  const [movedItem] = reorderedCategoryItems.splice(currentIndex, 1)
+  reorderedCategoryItems.splice(nextIndex, 0, movedItem)
+
+  const orderById = new Map(reorderedCategoryItems.map((item, index) => [item.id, index]))
+  const now = Date.now()
+
+  return items.map(item => {
+    const order = orderById.get(item.id)
+    if (order === undefined) return item
+
+    return {
+      ...item,
+      order,
+      updatedAt: item.id === id ? now : item.updatedAt
+    }
+  })
+}
+
 export function filterNavItems(items: NavItem[], selectedCategory: string, searchQuery: string): NavItem[] {
   let filtered = items
 
@@ -64,6 +116,7 @@ export function filterNavItems(items: NavItem[], selectedCategory: string, searc
     filtered = filtered
       .filter(item => Boolean(item.lastVisitedAt))
       .sort((a, b) => (b.lastVisitedAt || 0) - (a.lastVisitedAt || 0))
+      .slice(0, RECENT_NAV_LIMIT)
   } else if (selectedCategory !== ALL_CATEGORY_NAME) {
     filtered = filtered.filter(item => item.category === selectedCategory)
   }

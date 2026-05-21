@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react"
 import { MemoStorage } from "./memo-storage"
 import type { MemoDayRecord } from "./memo-storage"
-import { getNavHostname } from "./nav-utils"
+import { getNavHostname, moveNavItemWithinCategory, refreshFaviconUrl, sortNavItems } from "./nav-utils"
 import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
-import type { BackgroundSettings, NavItem } from "./storage"
+import type { BackgroundSettings, NavItem, RestorePoint } from "./storage"
 
 interface QuickNavBackup {
   version: 1
@@ -41,14 +41,24 @@ function IndexOptions() {
   const [storageInfo, setStorageInfo] = useState<{ used: number, available: number, percent: number } | null>(null)
   const [backgroundSettings, setBackgroundSettings] = useState<BackgroundSettings>({ urls: [], interval: 30000 })
   const [backgroundUrl, setBackgroundUrl] = useState("")
+  const [restorePoints, setRestorePoints] = useState<RestorePoint[]>([])
 
   useEffect(() => {
     loadNavItems()
     loadCategories()
     loadBackgroundSettings()
+    loadRestorePoints()
     checkUrlParams()
     getStorageUsage().then(setStorageInfo)
   }, [])
+
+  const loadRestorePoints = async () => {
+    try {
+      setRestorePoints(await NavStorage.getRestorePoints())
+    } catch (error) {
+      console.error("加载恢复点失败:", error)
+    }
+  }
 
   const loadBackgroundSettings = async () => {
     try {
@@ -162,7 +172,7 @@ function IndexOptions() {
     try {
       setLoading(true)
       const items = await NavStorage.getNavItems()
-      setNavItems(items)
+      setNavItems(sortNavItems(items))
     } catch (error) {
       console.error("加载数据失败:", error)
     } finally {
@@ -187,6 +197,27 @@ function IndexOptions() {
       await loadNavItems()
     } catch (error) {
       console.error("切换置顶失败:", error)
+    }
+  }
+
+  const handleMoveItem = async (id: string, direction: "up" | "down") => {
+    try {
+      const nextItems = moveNavItemWithinCategory(navItems, id, direction)
+      await NavStorage.setNavItems(nextItems)
+      setNavItems(sortNavItems(nextItems))
+    } catch (error) {
+      console.error("排序失败:", error)
+    }
+  }
+
+  const handleRefreshFavicon = async (item: NavItem) => {
+    try {
+      await NavStorage.updateNavItem(item.id, {
+        favicon: refreshFaviconUrl(item.url)
+      })
+      await loadNavItems()
+    } catch (error) {
+      console.error("刷新图标失败:", error)
     }
   }
 
@@ -331,6 +362,7 @@ function IndexOptions() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string)
+        await NavStorage.createRestorePoint("before-import")
         if (Array.isArray(data)) {
           await NavStorage.importNavItems(data)
         } else if (isQuickNavBackup(data)) {
@@ -351,6 +383,7 @@ function IndexOptions() {
         }
 
         await loadNavItems()
+        await loadRestorePoints()
         getStorageUsage().then(setStorageInfo)
         alert("导入成功！")
       } catch (error) {
@@ -369,11 +402,39 @@ function IndexOptions() {
     if (!confirm("确定要重置为默认数据吗？这会删除所有自定义导航项。")) return
     
     try {
+      await NavStorage.createRestorePoint("before-reset")
       await NavStorage.resetToDefault()
       await loadNavItems()
+      await loadRestorePoints()
     } catch (error) {
       console.error("重置失败:", error)
     }
+  }
+
+  const handleRestore = async (restorePoint: RestorePoint) => {
+    if (!confirm(`确定要恢复到 ${new Date(restorePoint.createdAt).toLocaleString()} 的数据吗？当前数据会被替换。`)) return
+
+    try {
+      await NavStorage.createRestorePoint("before-import")
+      await NavStorage.restoreFromPoint(restorePoint.id)
+      await loadNavItems()
+      await loadBackgroundSettings()
+      await loadRestorePoints()
+      getStorageUsage().then(setStorageInfo)
+      alert("恢复成功！")
+    } catch (error) {
+      console.error("恢复失败:", error)
+      alert("恢复失败，请重试")
+    }
+  }
+
+  const getCategorySortedItems = (category: string) => navItems.filter(item => item.category === category)
+
+  const isFirstInCategory = (item: NavItem) => getCategorySortedItems(item.category)[0]?.id === item.id
+
+  const isLastInCategory = (item: NavItem) => {
+    const categoryItems = getCategorySortedItems(item.category)
+    return categoryItems[categoryItems.length - 1]?.id === item.id
   }
 
   return (
@@ -428,6 +489,28 @@ function IndexOptions() {
           重置数据
         </button>
       </div>
+
+      {/* 恢复点 */}
+      {restorePoints.length > 0 && (
+        <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
+          <h3 style={{ margin: "0 0 8px 0" }}>数据恢复点</h3>
+          <p style={{ margin: "0 0 16px 0", color: "#64748b", fontSize: "14px" }}>
+            导入或重置前会自动保存最近 {restorePoints.length} 个恢复点，最多保留 5 个。
+          </p>
+          <div style={{ display: "grid", gap: 10 }}>
+            {restorePoints.map(point => (
+              <div key={point.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: "6px" }}>
+                <div style={{ color: "#475569", fontSize: "14px" }}>
+                  {new Date(point.createdAt).toLocaleString()} · {point.reason === "before-import" ? "导入前" : "重置前"} · {point.navItems.length} 项
+                </div>
+                <button type="button" onClick={() => handleRestore(point)} style={{ padding: "6px 12px", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>
+                  恢复
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 背景设置 */}
       <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
@@ -678,12 +761,35 @@ function IndexOptions() {
                     <span>{getNavHostname(item.url)}</span>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => handleMoveItem(item.id, "up")}
+                    disabled={isFirstInCategory(item)}
+                    style={{ padding: "4px 12px", background: isFirstInCategory(item) ? "#cbd5e1" : "#64748b", color: "white", border: "none", borderRadius: "4px", cursor: isFirstInCategory(item) ? "not-allowed" : "pointer", fontSize: "12px" }}
+                  >
+                    上移
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMoveItem(item.id, "down")}
+                    disabled={isLastInCategory(item)}
+                    style={{ padding: "4px 12px", background: isLastInCategory(item) ? "#cbd5e1" : "#64748b", color: "white", border: "none", borderRadius: "4px", cursor: isLastInCategory(item) ? "not-allowed" : "pointer", fontSize: "12px" }}
+                  >
+                    下移
+                  </button>
                   <button
                     onClick={() => handleTogglePinned(item.id)}
                     style={{ padding: "4px 12px", background: item.pinned ? "#2563eb" : "#64748b", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
                   >
                     {item.pinned ? "取消置顶" : "置顶"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRefreshFavicon(item)}
+                    style={{ padding: "4px 12px", background: "#0f766e", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}
+                  >
+                    刷新图标
                   </button>
                   <button
                     onClick={() => handleEdit(item)}

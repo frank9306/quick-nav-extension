@@ -4,7 +4,9 @@ import {
   deriveFaviconUrl,
   filterNavItems,
   isDuplicateUrl,
+  moveNavItemWithinCategory,
   normalizeNavUrl,
+  RECENT_NAV_LIMIT,
   sortNavItems
 } from "./nav-utils"
 import type { NavItem } from "./storage"
@@ -62,6 +64,32 @@ describe("sortNavItems", () => {
   })
 })
 
+describe("moveNavItemWithinCategory", () => {
+  it("moves an item within its own category only", () => {
+    const items: NavItem[] = [
+      { ...baseItem, id: "tools-1", category: "工具", order: 0 },
+      { ...baseItem, id: "tools-2", category: "工具", order: 1 },
+      { ...baseItem, id: "dev-1", category: "开发", order: 0 }
+    ]
+
+    const moved = moveNavItemWithinCategory(items, "tools-2", "up")
+    const sortedTools = sortNavItems(moved.filter(item => item.category === "工具"))
+    const sortedDev = sortNavItems(moved.filter(item => item.category === "开发"))
+
+    expect(sortedTools.map(item => item.id)).toEqual(["tools-2", "tools-1"])
+    expect(sortedDev.map(item => item.id)).toEqual(["dev-1"])
+  })
+
+  it("does nothing when moving beyond category bounds", () => {
+    const items: NavItem[] = [
+      { ...baseItem, id: "tools-1", category: "工具", order: 0 },
+      { ...baseItem, id: "tools-2", category: "工具", order: 1 }
+    ]
+
+    expect(moveNavItemWithinCategory(items, "tools-1", "up")).toEqual(items)
+  })
+})
+
 describe("filterNavItems", () => {
   const items: NavItem[] = [
     {
@@ -91,6 +119,18 @@ describe("filterNavItems", () => {
 
   it("filters recent visits", () => {
     expect(filterNavItems(items, "最近访问", "").map(item => item.id)).toEqual(["openai"])
+  })
+
+  it("limits recent visits", () => {
+    const recentItems = Array.from({ length: RECENT_NAV_LIMIT + 3 }, (_, index) => ({
+      ...baseItem,
+      id: `recent-${index}`,
+      title: `Recent ${index}`,
+      lastVisitedAt: index + 1
+    }))
+
+    expect(filterNavItems(recentItems, "最近访问", "")).toHaveLength(RECENT_NAV_LIMIT)
+    expect(filterNavItems(recentItems, "最近访问", "")[0].id).toBe(`recent-${RECENT_NAV_LIMIT + 2}`)
   })
 
   it("supports tag search", () => {

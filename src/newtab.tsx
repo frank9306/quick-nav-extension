@@ -441,7 +441,7 @@ function IndexNewtab() {
               <input
                 ref={searchInputRef}
                 type="text"
-                placeholder="搜索网站、工具或标签..."
+                placeholder="搜索标题、描述、域名，#标签，@分类"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="search-input"
@@ -484,9 +484,53 @@ function IndexNewtab() {
                 <div className="nav-grid">
                   {filteredItems.map(item => (
                     <div key={item.id} className={`nav-card ${item.pinned ? "pinned" : ""}`}>
-                      <span className="card-clicks" title="点击次数">{item.clicks || 0}</span>
+                      <div className="card-actions" aria-label="卡片操作">
+                        <button
+                          type="button"
+                          className={`card-action-btn pin-action ${item.pinned ? "active" : ""}`}
+                          onClick={() => handleTogglePinned(item.id)}
+                          title={item.pinned ? "取消置顶" : "置顶"}
+                          aria-label={item.pinned ? "取消置顶" : "置顶"}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M14.5 4.5 19.5 9.5" />
+                            <path d="m9 10-4 4 5 5 4-4" />
+                            <path d="m14 5-5 5 5 5 5-5Z" />
+                            <path d="m9 15-4 4" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className={`card-action-btn copy-action ${copiedItemId === item.id ? "copied" : ""}`}
+                          onClick={() => handleCopyUrl(item)}
+                          title={copiedItemId === item.id ? "已复制" : "复制链接"}
+                          aria-label={copiedItemId === item.id ? "已复制" : "复制链接"}
+                        >
+                          {copiedItemId === item.id ? (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M20 6 9 17l-5-5" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <rect x="9" y="9" width="11" height="11" rx="2" />
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                       <div className="card-header">
-                        {item.favicon && <img src={item.favicon} alt="" className="card-favicon" />}
+                        {item.favicon ? (
+                          <img
+                            src={item.favicon}
+                            alt=""
+                            className="card-favicon"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none"
+                            }}
+                          />
+                        ) : (
+                          <span className="card-favicon card-favicon-fallback">{item.title.slice(0, 1).toUpperCase()}</span>
+                        )}
                         <h3 className="card-title">
                           <a
                             href={item.url}
@@ -500,24 +544,6 @@ function IndexNewtab() {
                             {item.title}
                           </a>
                         </h3>
-                        <div className="card-actions">
-                          <button
-                            type="button"
-                            className={`card-action-btn ${item.pinned ? "active" : ""}`}
-                            onClick={() => handleTogglePinned(item.id)}
-                            title={item.pinned ? "取消置顶" : "置顶"}
-                          >
-                            {item.pinned ? "已置顶" : "置顶"}
-                          </button>
-                          <button
-                            type="button"
-                            className="card-action-btn"
-                            onClick={() => handleCopyUrl(item)}
-                            title="复制链接"
-                          >
-                            {copiedItemId === item.id ? "已复制" : "复制"}
-                          </button>
-                        </div>
                       </div>
                       
                       <p className="card-description">{item.description}</p>
@@ -533,6 +559,7 @@ function IndexNewtab() {
                       <div className="card-footer">
                         <span className="card-category">{item.category}</span>
                         <span className="card-url">{getNavHostname(item.url)}</span>
+                        <span className="card-clicks" title="点击次数">{item.clicks || 0}</span>
                       </div>
                     </div>
                   ))}
@@ -541,7 +568,7 @@ function IndexNewtab() {
                 {!loading && filteredItems.length === 0 && (
                   <div className="empty-state">
                     <p>没有找到匹配的导航项目</p>
-                    <p>试试调整搜索关键词或选择其他分类</p>
+                    <p>试试标题、描述、域名，或使用 #标签、@分类 搜索</p>
                   </div>
                 )}
               </>

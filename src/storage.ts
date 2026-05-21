@@ -38,9 +38,19 @@ export interface MemoUiSettings {
   collapsed: boolean
 }
 
+export interface RestorePoint {
+  id: string
+  createdAt: number
+  reason: "before-import" | "before-reset"
+  navItems: NavItem[]
+  backgroundSettings: BackgroundSettings
+}
+
 const STORAGE_KEY = 'quick-nav-items'
 const BACKGROUND_SETTINGS_KEY = 'quick-nav-background-settings'
 const MEMO_UI_SETTINGS_KEY = 'quick-nav-memo-ui-settings'
+const RESTORE_POINTS_KEY = 'quick-nav-restore-points'
+const MAX_RESTORE_POINTS = 5
 
 const defaultBackgroundSettings: BackgroundSettings = {
   urls: [],
@@ -396,6 +406,48 @@ export class NavStorage {
       console.error('保存备忘录界面设置失败:', error)
       throw error
     }
+  }
+
+  static async getRestorePoints(): Promise<RestorePoint[]> {
+    try {
+      const result = await chrome.storage.local.get([RESTORE_POINTS_KEY])
+      const points = Array.isArray(result[RESTORE_POINTS_KEY]) ? result[RESTORE_POINTS_KEY] : []
+
+      return points
+        .filter(point => point && Array.isArray(point.navItems) && point.backgroundSettings)
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    } catch (error) {
+      console.error('获取恢复点失败:', error)
+      return []
+    }
+  }
+
+  static async createRestorePoint(reason: RestorePoint["reason"]): Promise<RestorePoint> {
+    const now = Date.now()
+    const restorePoint: RestorePoint = {
+      id: `${now}-${Math.random().toString(36).slice(2, 9)}`,
+      createdAt: now,
+      reason,
+      navItems: await this.getNavItems(),
+      backgroundSettings: await this.getBackgroundSettings()
+    }
+
+    const points = await this.getRestorePoints()
+    await chrome.storage.local.set({
+      [RESTORE_POINTS_KEY]: [restorePoint, ...points].slice(0, MAX_RESTORE_POINTS)
+    })
+
+    return restorePoint
+  }
+
+  static async restoreFromPoint(id: string): Promise<boolean> {
+    const points = await this.getRestorePoints()
+    const restorePoint = points.find(point => point.id === id)
+    if (!restorePoint) return false
+
+    await this.importNavItems(restorePoint.navItems)
+    await this.setBackgroundSettings(restorePoint.backgroundSettings)
+    return true
   }
 
   // 智能分类建议
