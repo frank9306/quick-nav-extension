@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { MemoStorage } from "./memo-storage"
 import type { MemoDayRecord } from "./memo-storage"
+import { getNavHostname } from "./nav-utils"
 import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
 import type { BackgroundSettings, NavItem } from "./storage"
 
@@ -354,7 +355,11 @@ function IndexOptions() {
         alert("导入成功！")
       } catch (error) {
         console.error("导入失败:", error)
-        alert("导入失败，请检查文件格式")
+        if (error instanceof DuplicateNavItemError) {
+          alert(`导入失败：存在重复 URL（${error.existingItem.title}）`)
+        } else {
+          alert("导入失败，请检查文件格式")
+        }
       }
     }
     reader.readAsText(file)
@@ -670,7 +675,7 @@ function IndexOptions() {
                     <span>分类: {item.category}</span>
                     <span>标签: {item.tags.join(", ")}</span>
                     <span>点击: {item.clicks || 0}</span>
-                    <span>{new URL(item.url).hostname}</span>
+                    <span>{getNavHostname(item.url)}</span>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
