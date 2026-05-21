@@ -218,6 +218,7 @@ function IndexOptions() {
   }
 
   const handleEdit = (item: NavItem) => {
+    setFormError("")
     setEditingItem(item)
     
     // 检查当前分类是否在可用分类列表中
@@ -393,7 +394,10 @@ function IndexOptions() {
       {/* 操作按钮 */}
       <div style={{ marginBottom: 30, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
+          onClick={() => {
+            setFormError("")
+            setShowAddForm(!showAddForm)
+          }}
           style={{
             padding: "10px 20px",
             background: "#3b82f6",
@@ -596,6 +600,7 @@ function IndexOptions() {
                   setFormData({ title: "", url: "", description: "", category: "工具", tags: "" })
                   setCustomCategory("")
                   setIsCustomCategory(false)
+                  setFormError("")
                 }}
                 style={{ padding: "10px 20px", background: "#6b7280", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
               >

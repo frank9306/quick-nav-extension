@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react"
 import "./style.css"
 import { MemoStorage } from "./memo-storage"
 import type { MemoTask } from "./memo-storage"
+import { sortNavItems } from "./nav-utils"
 import { NavStorage } from "./storage"
 import type { NavItem } from "./storage"
 
@@ -219,7 +220,7 @@ function IndexNewtab() {
       )
     }
 
-    const sorted = [...filtered].sort((a, b) => (b.clicks || 0) - (a.clicks || 0))
+    const sorted = sortNavItems(filtered)
     setFilteredItems(sorted)
   }, [searchQuery, selectedCategory, navItems])
 
