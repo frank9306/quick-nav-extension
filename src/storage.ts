@@ -1,4 +1,5 @@
 import { deriveFaviconUrl, isDuplicateUrl } from "./nav-utils"
+import { createSyncId } from "./sync-utils"
 
 // 导航数据存储服务
 export interface NavItem {
@@ -176,6 +177,7 @@ function normalizeNavItem(item: NavItem): NavItem {
     favicon: item.favicon || deriveFaviconUrl(item.url),
     clicks: item.clicks || 0,
     pinned: Boolean(item.pinned),
+    syncId: item.syncId || createSyncId(),
     createdAt: item.createdAt || now,
     updatedAt: item.updatedAt || now
   }
@@ -188,9 +190,20 @@ export class NavStorage {
     try {
       const result = await chrome.storage.local.get([STORAGE_KEY])
       const items = result[STORAGE_KEY] || defaultNavItems
-      return items.map(normalizeNavItem)
+      return items.map(normalizeNavItem).filter(item => !item.deletedAt)
     } catch (error) {
       console.error('获取导航数据失败:', error)
+      return defaultNavItems.map(normalizeNavItem).filter(item => !item.deletedAt)
+    }
+  }
+
+  static async getRawNavItems(): Promise<NavItem[]> {
+    try {
+      const result = await chrome.storage.local.get([STORAGE_KEY])
+      const items = result[STORAGE_KEY] || defaultNavItems
+      return items.map(normalizeNavItem)
+    } catch (error) {
+      console.error('获取原始导航数据失败:', error)
       return defaultNavItems.map(normalizeNavItem)
     }
   }
@@ -295,11 +308,16 @@ export class NavStorage {
 
   // 删除导航项
   static async deleteNavItem(id: string): Promise<boolean> {
-    const items = await this.getNavItems()
-    const filteredItems = items.filter(item => item.id !== id)
-    if (filteredItems.length === items.length) return false
+    const items = await this.getRawNavItems()
+    const index = items.findIndex(item => item.id === id)
+    if (index === -1) return false
 
-    await this.setNavItems(filteredItems)
+    items[index] = normalizeNavItem({
+      ...items[index],
+      deletedAt: Date.now(),
+      updatedAt: Date.now()
+    })
+    await this.setNavItems(items)
     return true
   }
 

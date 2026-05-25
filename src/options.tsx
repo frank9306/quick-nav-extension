@@ -16,6 +16,9 @@ import {
 } from "./nav-utils"
 import { DuplicateNavItemError, NavStorage, getStorageUsage } from "./storage"
 import type { BackgroundSettings, NavItem, RestorePoint } from "./storage"
+import { SyncStorage, defaultFeishuSyncSettings } from "./sync-storage"
+import { initializeFeishuFields, pullFromFeishu, pushToFeishu, syncWithFeishu, testFeishuConnection } from "./sync-service"
+import type { FeishuSyncSettings, SyncResult } from "./sync-types"
 
 interface QuickNavBackup {
   version: 1
@@ -60,15 +63,28 @@ function IndexOptions() {
   const [backgroundSettings, setBackgroundSettings] = useState<BackgroundSettings>({ urls: [], interval: 30000 })
   const [backgroundUrl, setBackgroundUrl] = useState("")
   const [restorePoints, setRestorePoints] = useState<RestorePoint[]>([])
+  const [feishuSettings, setFeishuSettings] = useState<FeishuSyncSettings>(defaultFeishuSyncSettings)
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [syncStatus, setSyncStatus] = useState("")
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
 
   useEffect(() => {
     loadNavItems()
     loadCategories()
     loadBackgroundSettings()
     loadRestorePoints()
+    loadFeishuSettings()
     checkUrlParams()
     getStorageUsage().then(setStorageInfo)
   }, [])
+
+  const loadFeishuSettings = async () => {
+    try {
+      setFeishuSettings(await SyncStorage.getFeishuSettings())
+    } catch (error) {
+      console.error("加载飞书同步设置失败:", error)
+    }
+  }
 
   const loadRestorePoints = async () => {
     try {
@@ -207,6 +223,50 @@ function IndexOptions() {
   const saveManagedNavItems = async (items: NavItem[]) => {
     await NavStorage.setNavItems(items)
     await reloadNavMetadata()
+  }
+
+  const saveFeishuSettings = async () => {
+    await SyncStorage.setFeishuSettings(feishuSettings)
+    setSyncStatus("飞书同步配置已保存")
+  }
+
+  const runSyncAction = async (label: string, action: () => Promise<SyncResult | number>) => {
+    try {
+      setSyncBusy(true)
+      setSyncStatus(`${label}中...`)
+      setSyncResult(null)
+      await SyncStorage.setFeishuSettings(feishuSettings)
+      const result = await action()
+
+      if (typeof result === "number") {
+        setSyncStatus(`连接成功，当前表中可读取 ${result} 条记录`)
+      } else {
+        setSyncResult(result)
+        setSyncStatus(`${label}完成`)
+        await reloadNavMetadata()
+        await loadFeishuSettings()
+      }
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
+  const initializeFeishuTableFields = async () => {
+    try {
+      setSyncBusy(true)
+      setSyncStatus("初始化字段中...")
+      setSyncResult(null)
+      await SyncStorage.setFeishuSettings(feishuSettings)
+      const createdFields = await initializeFeishuFields(feishuSettings)
+      setSyncStatus(createdFields.length > 0 ? `已创建字段：${createdFields.join(", ")}` : "字段已完整，无需创建")
+      await loadFeishuSettings()
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSyncBusy(false)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -629,6 +689,88 @@ function IndexOptions() {
           </div>
         </div>
       )}
+
+      {/* 飞书同步 */}
+      <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
+        <h3 style={{ margin: "0 0 8px 0" }}>飞书多维表同步</h3>
+        <p style={{ margin: "0 0 12px 0", color: "#64748b", fontSize: "14px" }}>
+          第一版仅同步导航项，不同步背景、备忘录和恢复点。字段名需使用 syncId、title、url、description、category、tags、favicon、clicks、pinned、order、lastVisitedAt、createdAt、updatedAt、deletedAt、payload。
+        </p>
+        <div style={{ marginBottom: 16, padding: "10px 12px", color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "6px", fontSize: "13px" }}>
+          安全提示：App Secret 会保存在本地浏览器扩展存储中，仅建议个人自用，不要截图、导出或分享你的配置。
+        </div>
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, color: "#475569", fontSize: "14px" }}>
+          <input
+            type="checkbox"
+            checked={feishuSettings.enabled}
+            onChange={(e) => setFeishuSettings(settings => ({ ...settings, enabled: e.target.checked }))}
+          />
+          启用飞书同步
+        </label>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
+          <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+            App ID
+            <input value={feishuSettings.appId} onChange={(e) => setFeishuSettings(settings => ({ ...settings, appId: e.target.value }))} placeholder="cli_xxx" style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }} />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+            App Secret
+            <input type="password" value={feishuSettings.appSecret} onChange={(e) => setFeishuSettings(settings => ({ ...settings, appSecret: e.target.value }))} placeholder="飞书应用密钥" style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }} />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+            App Token
+            <input value={feishuSettings.appToken} onChange={(e) => setFeishuSettings(settings => ({ ...settings, appToken: e.target.value }))} placeholder="bascnxxx" style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }} />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: "13px", color: "#475569" }}>
+            Table ID
+            <input value={feishuSettings.tableId} onChange={(e) => setFeishuSettings(settings => ({ ...settings, tableId: e.target.value }))} placeholder="tblxxx" style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: "4px" }} />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <button type="button" onClick={saveFeishuSettings} disabled={syncBusy} style={{ padding: "8px 14px", background: "#64748b", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            保存配置
+          </button>
+          <button type="button" onClick={() => runSyncAction("测试连接", () => testFeishuConnection(feishuSettings))} disabled={syncBusy} style={{ padding: "8px 14px", background: "#0f766e", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            测试连接
+          </button>
+          <button type="button" onClick={initializeFeishuTableFields} disabled={syncBusy} style={{ padding: "8px 14px", background: "#0891b2", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            初始化字段
+          </button>
+          <button type="button" onClick={() => runSyncAction("从飞书拉取", () => pullFromFeishu(feishuSettings))} disabled={syncBusy} style={{ padding: "8px 14px", background: "#3b82f6", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            从飞书拉取
+          </button>
+          <button type="button" onClick={() => runSyncAction("推送到飞书", () => pushToFeishu(feishuSettings))} disabled={syncBusy} style={{ padding: "8px 14px", background: "#10b981", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            推送到飞书
+          </button>
+          <button type="button" onClick={() => runSyncAction("双向同步", () => syncWithFeishu(feishuSettings))} disabled={syncBusy} style={{ padding: "8px 14px", background: "#8b5cf6", color: "white", border: "none", borderRadius: "4px", cursor: syncBusy ? "not-allowed" : "pointer" }}>
+            双向同步
+          </button>
+        </div>
+
+        <div style={{ color: "#64748b", fontSize: "13px" }}>
+          <div>上次同步：{feishuSettings.lastSyncedAt ? new Date(feishuSettings.lastSyncedAt).toLocaleString() : "从未同步"}</div>
+          {syncStatus && <div style={{ marginTop: 4 }}>状态：{syncStatus}</div>}
+          {syncResult && (
+            <>
+              <div style={{ marginTop: 4 }}>
+                结果：拉取 {syncResult.pulled}，推送 {syncResult.pushed}，新增 {syncResult.created}，更新 {syncResult.updated}，跳过 {syncResult.skipped}，删除标记 {syncResult.deleted}{syncResult.errors.length > 0 ? `，错误 ${syncResult.errors.length}` : ""}
+              </div>
+              {syncResult.errors.length > 0 && (
+                <details style={{ marginTop: 8, padding: "8px 10px", color: "#991b1b", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px" }}>
+                  <summary style={{ cursor: "pointer" }}>查看错误详情</summary>
+                  <ul style={{ margin: "8px 0 0 18px", padding: 0 }}>
+                    {Array.from(new Set(syncResult.errors)).map((error, index) => (
+                      <li key={`${error}-${index}`} style={{ marginBottom: 4 }}>{error}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* 背景设置 */}
       <div style={{ background: "white", padding: 24, borderRadius: "8px", marginBottom: 30, border: "1px solid #e2e8f0" }}>
